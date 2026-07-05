@@ -1,0 +1,41 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/app/models          # persist trained models
+      - ./datasets:/app/datasets      # persist datasets
+      - ./sleep_ai.db:/app/sleep_ai.db # persist SQLite DB
+    environment:
+      - PYTHONIOENCODING=utf-8
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}   # optional
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-sleep-ai-dev-secret-change-in-prod}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/status')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "8501:8501"
+    environment:
+      - API_URL=http://backend:8000   # service discovery within Docker network
+      - PYTHONIOENCODING=utf-8
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  default:
+    name: sleep-ai-network

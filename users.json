@@ -1,0 +1,10 @@
+{
+  "testuser_07dfae25": {
+    "hash": "e3cf75ddfa65eeed60a87e3f79f0363fd5a6a7dd9774d92f1abf07cda0dde0cb",
+    "salt": "436611c4e13b6e673ffdfc05eb37739f"
+  },
+  "dup_eefbd376": {
+    "hash": "a09cee246cb9fbc1a2aab0918fe40043f82706a6203d9c02c44dd932e6ee443c",
+    "salt": "cd19fd21bae1088eee27174a8965f5e6"
+  }
+}
