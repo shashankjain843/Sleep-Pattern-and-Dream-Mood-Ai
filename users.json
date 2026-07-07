@@ -6,5 +6,21 @@
   "dup_eefbd376": {
     "hash": "a09cee246cb9fbc1a2aab0918fe40043f82706a6203d9c02c44dd932e6ee443c",
     "salt": "cd19fd21bae1088eee27174a8965f5e6"
+  },
+  "testuser_eaa62aa7": {
+    "hash": "b5702124b955130c6eb8d0b885dc3fc8d823ff126061f1427d99b31015ed18e7",
+    "salt": "9025bd1415509f311ec078290b2f044b"
+  },
+  "dup_115c6417": {
+    "hash": "b0b80aebb957c1cf14759cd6633e65a324150c58206abf2532274cdfbda8cd63",
+    "salt": "78d1b686459e4bd9ab526e2a121c47a5"
+  },
+  "testuser_4e1bdc2c": {
+    "hash": "8dadc8422a3caacec4a56523c14254e6a982d1a15fd17c6f2e52eb22b7364ca0",
+    "salt": "acb7bb66cf50e9c257cc1f06ce4fa8d7"
+  },
+  "dup_eb223192": {
+    "hash": "a0b0950ce1dcf7e4deddc22bbe2d736ce2400a79e0c182acabeb48d185f98502",
+    "salt": "849a83696126327027629cbb0314362a"
   }
 }
