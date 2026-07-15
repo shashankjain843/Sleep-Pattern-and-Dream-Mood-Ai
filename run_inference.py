@@ -24,6 +24,7 @@ except ImportError:
 
 # Model paths
 SLEEP_MODEL_PATH = "models/sleep_cnn_lstm/model.h5"
+SLEEP_RF_MODEL_PATH = "models/sleep_rf.model"
 MOOD_MODEL_PATH  = "models/mood_xgb.model"
 
 
@@ -35,10 +36,13 @@ def load_models():
     if TF_AVAILABLE and os.path.exists(SLEEP_MODEL_PATH):
         sleep_model = tf.keras.models.load_model(SLEEP_MODEL_PATH)
         logger.info("Sleep CNN-LSTM model loaded from %s", SLEEP_MODEL_PATH)
+    elif os.path.exists(SLEEP_RF_MODEL_PATH):
+        sleep_model = joblib.load(SLEEP_RF_MODEL_PATH)
+        logger.info("Sleep Random Forest fallback model loaded from %s", SLEEP_RF_MODEL_PATH)
     elif not TF_AVAILABLE:
-        logger.info("Sleep CNN model skipped (TensorFlow not installed). Simulation mode active.")
+        logger.info("Sleep model skipped (TensorFlow not installed and no Random Forest model found). Simulation mode active.")
     else:
-        logger.warning("Sleep model file not found at %s", SLEEP_MODEL_PATH)
+        logger.warning("Sleep model file not found at %s or %s", SLEEP_MODEL_PATH, SLEEP_RF_MODEL_PATH)
 
     if os.path.exists(MOOD_MODEL_PATH):
         mood_model = joblib.load(MOOD_MODEL_PATH)
@@ -53,12 +57,22 @@ def load_models():
 def predict_sleep_segment(data_segment, model):
     if model is None:
         return "Unknown"
-    # data_segment: (1, Channels, 3000) → (1, 3000, Channels)
-    if data_segment.shape[1] != 3000:
-        data_segment = np.transpose(data_segment, (0, 2, 1))
-
-    pred      = model.predict(data_segment, verbose=0)
-    class_idx = np.argmax(pred, axis=1)[0]
+    
+    # Check if this is a Keras model (TF) or a Scikit-Learn RandomForestClassifier model
+    is_keras = hasattr(model, "layers") or "Sequential" in str(type(model)) or "Functional" in str(type(model))
+    
+    if is_keras:
+        # data_segment: (1, Channels, 3000) → (1, 3000, Channels)
+        if data_segment.shape[1] != 3000:
+            data_segment = np.transpose(data_segment, (0, 2, 1))
+        pred      = model.predict(data_segment, verbose=0)
+        class_idx = np.argmax(pred, axis=1)[0]
+    else:
+        # Random Forest expects flattened input of shape (1, 6000)
+        data_flat = data_segment.reshape(1, -1)
+        pred = model.predict(data_flat)
+        class_idx = pred[0]
+        
     mapping   = {0: "Light", 1: "Deep", 2: "REM"}
     return mapping.get(class_idx, "Unknown")
 

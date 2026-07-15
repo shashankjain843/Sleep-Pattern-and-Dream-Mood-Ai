@@ -20,6 +20,18 @@ import numpy as np
 import plotly.graph_objects as go
 import requests
 
+def load_env_file():
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, val = line.split("=", 1)
+                    os.environ[key.strip()] = val.strip()
+
+load_env_file()
+
 # ── Configuration ─────────────────────────────────────────────────────────────
 API_URL = os.environ.get("API_URL", "http://localhost:8000")
 
@@ -183,7 +195,17 @@ def model_badge(is_model: bool):
 
 def auth_headers() -> dict:
     token = st.session_state.get("token", "")
-    return {"Authorization": f"Bearer {token}"} if token else {}
+    headers = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    
+    g_key = st.session_state.get("gemini_api_key", "")
+    a_key = st.session_state.get("anthropic_api_key", "")
+    if g_key:
+        headers["X-Gemini-Key"] = g_key
+    if a_key:
+        headers["X-Anthropic-Key"] = a_key
+    return headers
 
 
 def api_get(path: str) -> dict:
@@ -207,10 +229,14 @@ def api_post(path: str, **kwargs) -> dict | None:
 
 
 # ── Fetch real backend status ─────────────────────────────────────────────────
-@st.cache_data(ttl=30)
-def get_backend_status():
+def get_backend_status(gemini_key="", anthropic_key=""):
     try:
-        r = requests.get(f"{API_URL}/status", timeout=5)
+        headers = {}
+        if gemini_key:
+            headers["X-Gemini-Key"] = gemini_key
+        if anthropic_key:
+            headers["X-Anthropic-Key"] = anthropic_key
+        r = requests.get(f"{API_URL}/status", headers=headers, timeout=5)
         return r.json() if r.status_code == 200 else None
     except Exception:
         return None
@@ -223,8 +249,8 @@ st.markdown("<div class='glow-divider'></div>", unsafe_allow_html=True)
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### ⚙️ CONTROL PANEL")
-    mode = st.radio("SELECT MODE", ["Real Input Mode", "Live Simulation Mode", "📈 History & Trends"])
+    st.markdown("### 🧭 NAVIGATION PANEL")
+    mode = st.radio("SELECT MODE", ["Real Input Mode", "Live Simulation Mode", "📈 History & Trends", "🌌 Visual Dream Journal"])
 
     st.markdown("---")
 
@@ -251,63 +277,71 @@ with st.sidebar:
                 elif resp:
                     st.error("Invalid credentials")
         with tab_reg:
-            ru = st.text_input("Username", key="reg_user")
-            rp = st.text_input("Password", type="password", key="reg_pass")
-            if st.button("Register", key="btn_reg"):
-                resp = api_post("/register", json={"username": ru, "password": rp})
-                if resp:
-                    st.success("Registered! Please log in.")
+            if st.session_state.get("verify_username"):
+                username_verify = st.session_state["verify_username"]
+                st.info(f"Verify registration for **{username_verify}**")
+                
+                mock_code = st.session_state.get("verify_mock_code", "")
+                if mock_code:
+                    st.success(f"📨 **[Mock Email Client]**\nCode: `{mock_code}` sent to your email.")
+                
+                verify_code = st.text_input("Enter 6-digit Code", key="input_verify_code")
+                
+                v_col1, v_col2 = st.columns(2)
+                with v_col1:
+                    if st.button("Verify & Login", key="btn_verify_confirm"):
+                        if not verify_code.strip():
+                            st.error("Please enter the verification code.")
+                        else:
+                            resp = api_post("/verify_email", json={"username": username_verify, "verification_code": verify_code})
+                            if resp and "access_token" in resp:
+                                st.session_state["token"]    = resp["access_token"]
+                                st.session_state["username"] = resp["username"]
+                                st.session_state.pop("verify_username", None)
+                                st.session_state.pop("verify_mock_code", None)
+                                st.success("Registered and Logged in successfully!")
+                                st.rerun()
+                with v_col2:
+                    if st.button("Cancel", key="btn_verify_cancel"):
+                        st.session_state.pop("verify_username", None)
+                        st.session_state.pop("verify_mock_code", None)
+                        st.rerun()
+            else:
+                ru = st.text_input("Username", key="reg_user")
+                re = st.text_input("Email", key="reg_email")
+                rp = st.text_input("Password", type="password", key="reg_pass")
+                if st.button("Register", key="btn_reg"):
+                    if not ru.strip() or not re.strip() or not rp.strip():
+                        st.error("All fields are required.")
+                    else:
+                        resp = api_post("/register", json={"username": ru, "password": rp, "email": re})
+                        if resp and "mock_code" in resp:
+                            st.session_state["verify_username"] = ru
+                            st.session_state["verify_mock_code"] = resp["mock_code"]
+                            st.rerun()
 
-    st.markdown("---")
 
-    # ── Real backend status ───────────────────────────────────────────────────
-    st.markdown("### 📊 SYSTEM STATUS")
-    status = get_backend_status()
-    if status is None:
-        st.markdown("🔴 **Backend**: Offline")
-    else:
-        st.markdown("🟢 **Backend**: Online")
-        tf_icon   = "🟢" if status.get("tf_available")       else "🟠"
-        sleep_icon = "🟢" if status.get("sleep_model_loaded") else "🔴"
-        mood_icon  = "🟢" if status.get("mood_model_loaded")  else "🔴"
-        claude_icon = "🟢" if status.get("claude_available")  else "🔴"
-        st.markdown(f"{tf_icon} **TensorFlow**: {'Available' if status.get('tf_available') else 'Not installed'}")
-        st.markdown(f"{sleep_icon} **Sleep Model**: {'Loaded' if status.get('sleep_model_loaded') else 'Not loaded'}")
-        st.markdown(f"{mood_icon} **Mood Model**: {'Loaded' if status.get('mood_model_loaded') else 'Not loaded'}")
-        st.markdown(f"{claude_icon} **Claude AI**: {'Active' if status.get('claude_available') else 'No API key'}")
-
-    st.markdown("---")
-
-    # ── About the Models ─────────────────────────────────────────────────────
-    with st.expander("🔬 About the Models"):
-        import json as _json, os as _os
-
-        sleep_metrics_path = "models/sleep_cnn_lstm/metrics.json"
-        mood_metrics_path  = "models/mood_xgb_metrics.json"
-
-        st.markdown("**Sleep CNN-LSTM**")
-        if _os.path.exists(sleep_metrics_path):
-            with open(sleep_metrics_path) as f:
-                sm = _json.load(f)
-            st.metric("Accuracy", f"{sm['accuracy']*100:.1f}%")
-            st.caption(f"Trained: {sm.get('trained_at', 'unknown')[:10]}")
-        else:
-            st.caption("Run train_sleep_model.py to see metrics")
-
-        st.markdown("**Mood XGBoost**")
-        if _os.path.exists(mood_metrics_path):
-            with open(mood_metrics_path) as f:
-                mm = _json.load(f)
-            st.metric("Accuracy", f"{mm['accuracy']*100:.1f}%")
-            st.caption(f"Trained: {mm.get('trained_at', 'unknown')[:10]}")
-        else:
-            st.caption("Run train_mood_model.py to see metrics")
 
 
 # ── Report helper (shared by both modes) ─────────────────────────────────────
 def display_report_section(sleep_data: dict, mood_data: dict):
     st.markdown("<div class='glow-divider'></div>", unsafe_allow_html=True)
     st.markdown("## 📋 YOUR PERSONALISED REPORT")
+
+    st.markdown("### 📊 ADD DAILY HABITS (For AI Trend Analysis)")
+    hc1, hc2 = st.columns(2)
+    with hc1:
+        caffeine_hour = st.number_input(
+            "Last caffeine consumption hour (24-hour format, e.g. 15 for 3:00 PM)",
+            min_value=0, max_value=23, value=15, step=1,
+            help="Specify when you last consumed coffee, tea, or soda."
+        )
+    with hc2:
+        workout_evening = st.checkbox(
+            "Did you do a strenuous workout in the evening?",
+            value=False,
+            help="Checked if you worked out within 4 hours before bedtime."
+        )
 
     with st.spinner("Analysing Bio-Metrics…"):
         sleep_metrics = {
@@ -317,6 +351,8 @@ def display_report_section(sleep_data: dict, mood_data: dict):
             "light_percent":sleep_data.get("light_percent", 0),
             "duration":     sleep_data.get("duration", 8),
             "awakenings":   sleep_data.get("awakenings", 0),
+            "caffeine_hour": caffeine_hour,
+            "workout_evening": 1 if workout_evening else 0,
         }
         mood_metrics = {
             "mood":          mood_data.get("mood", "Unknown"),
@@ -328,9 +364,10 @@ def display_report_section(sleep_data: dict, mood_data: dict):
             st.error("Report generation failed")
             return
 
-    # ── Claude indicator ──────────────────────────────────────────────────────
+    # ── AI indicator ──────────────────────────────────────────────────────────
     if report.get("claude_powered"):
-        st.info("✨ **AI-Enhanced Report** — narrative generated by Claude AI")
+        provider_name = report.get("ai_provider", "AI").capitalize()
+        st.info(f"✨ **AI-Enhanced Report** — narrative generated by {provider_name} AI")
 
     st.markdown(f"<h2 style='text-align:center;color:#fff;'>{report['title']}</h2>", unsafe_allow_html=True)
     st.markdown(f"<p style='text-align:center;color:#ccc;'>{report['summary']}</p>", unsafe_allow_html=True)
@@ -726,6 +763,123 @@ elif mode == "📈 History & Trends":
                 df[["timestamp","source","efficiency","rem_%","deep_%","mood_label"]],
                 use_container_width=True,
             )
+
+        st.markdown("<div class='glow-divider'></div>", unsafe_allow_html=True)
+        st.markdown("### 🧠 AI SLEEP CYCLE OPTIMIZER & TREND ANALYST")
+        st.markdown(
+            "This engine runs correlations across your sleep history (caffeine intake times, "
+            "evening workouts, sleep efficiency) and uses AI to optimize your circadian rhythm."
+        )
+        
+        if st.button("🔬 RUN AI DATA ANALYSIS", key="btn_run_analysis"):
+            with st.spinner("Analyzing database history and correlating metrics…"):
+                analysis = api_get("/analyze_trends")
+                
+                if analysis and "error" not in analysis:
+                    # Render correlations
+                    corrs = analysis.get("correlations", {})
+                    if corrs:
+                        st.markdown("#### 📊 Discovered Bio-Habit Correlations")
+                        cc1, cc2 = st.columns(2)
+                        with cc1:
+                            if "caffeine_vs_efficiency" in corrs:
+                                val = corrs["caffeine_vs_efficiency"]
+                                st.metric("Caffeine Hour vs Sleep Efficiency", f"{val}", help="Negative value indicates later caffeine lowers efficiency.")
+                        with cc2:
+                            if "workout_vs_deep_sleep" in corrs:
+                                val = corrs["workout_vs_deep_sleep"]
+                                st.metric("Evening Workout vs Deep Sleep %", f"{val}", help="Negative value indicates evening workouts reduce deep sleep.")
+                    
+                    # Render rule-based flags
+                    flags = analysis.get("flags", [])
+                    if flags:
+                        st.markdown("#### 🚨 Circadian Cycle Flags")
+                        for f in flags:
+                            st.warning(f)
+                            
+                    # Render AI advice
+                    st.markdown("#### 💡 AI Circadian Cutoffs & Personalised Tip")
+                    st.markdown(f"<div class='chat-answer'>{analysis.get('personalized_report')}</div>", unsafe_allow_html=True)
+                    st.caption("✨ Powered by Google Gemini AI")
+                else:
+                    err_msg = analysis.get("error", "Trend analysis failed.") if analysis else "Trend analysis failed."
+                    st.error(f"{err_msg} Log at least 2 sessions with caffeine/workout habits to compute trends.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MODE 4 — Visual Dream Journal
+# ═══════════════════════════════════════════════════════════════════════════════
+elif mode == "🌌 Visual Dream Journal":
+    st.markdown("## 🌌 VISUAL DREAM JOURNAL")
+    st.markdown(
+        "AI will psychologically interpret your dream based on last night's "
+        "biometrics, and dynamically paint a visual art of your dream!"
+    )
+    
+    # Try fetching biometric data from the latest session
+    latest_rem = 20.0
+    latest_hr = 70
+    latest_mood = "Neutral"
+    
+    resp = api_get("/history")
+    sessions = resp.get("sessions", [])
+    if sessions:
+        latest = sessions[0]
+        sm = latest.get("sleep_metrics", {})
+        mm = latest.get("mood_metrics", {})
+        latest_rem = sm.get("rem_percent", latest_rem)
+        latest_hr = int(sm.get("hr", mm.get("hr", latest_hr)))
+        latest_mood = mm.get("mood", latest_mood)
+        st.info(f"📋 Associated last session biometrics: **REM Sleep {latest_rem}%**, **HR {latest_hr} BPM**, **Predicted Mood: {latest_mood}**.")
+    else:
+        st.warning("⚠️ No sleep logs found in history. Using standard default biometrics.")
+        
+    with st.form("dream_form"):
+        dream_text = st.text_area("What did you dream about?", 
+                                  placeholder="e.g. I was flying through a neon city, and then it started raining stars...",
+                                  height=150)
+        
+        st.markdown("**Adjust Biometrics manually if desired:**")
+        b1, b2, b3 = st.columns(3)
+        with b1:
+            rem_val = st.slider("REM Sleep %", 0.0, 50.0, float(latest_rem))
+        with b2:
+            hr_val = st.slider("Sleep Heart Rate (BPM)", 40, 120, int(latest_hr))
+        with b3:
+            mood_val = st.selectbox("Dream Mood", ["Positive", "Neutral", "Negative"], index=["Positive", "Neutral", "Negative"].index(latest_mood) if latest_mood in ["Positive", "Neutral", "Negative"] else 1)
+            
+        submit_dream = st.form_submit_button("🔮 ANALYZE & PAINT DREAM")
+        
+    if submit_dream:
+        if not dream_text.strip():
+            st.error("Please describe your dream first!")
+        else:
+            with st.spinner("Analyzing dream symbols and painting visual scene…"):
+                payload = {
+                    "dream_text": dream_text,
+                    "mood": mood_val,
+                    "rem_percent": rem_val,
+                    "heart_rate": hr_val
+                }
+                res = api_post("/analyze_dream", json=payload)
+                
+                if res and "error" not in res:
+                    st.markdown("<div class='glow-divider'></div>", unsafe_allow_html=True)
+                    
+                    dc1, dc2 = st.columns([3, 2])
+                    with dc1:
+                        st.markdown(f"### 🏷️ Mood Tag: **{res.get('mood_tag', 'Dream')}**")
+                        st.markdown("### 🧠 Psychological Interpretation")
+                        st.markdown(f"<div class='chat-answer' style='font-size:1.1rem; border-left-color: #ff00ff;'>{res.get('interpretation')}</div>", unsafe_allow_html=True)
+                        st.caption("✨ Powered by Google Gemini AI")
+                        
+                        st.markdown("#### 🎨 Generated Prompt for Art:")
+                        st.caption(res.get("image_prompt"))
+                    with dc2:
+                        st.markdown("### 🖼️ Painted Dream Scene")
+                        st.image(res.get("image_url"), caption=f"Dream visual matching tag: {res.get('mood_tag')}", use_container_width=True)
+                else:
+                    st.error("Could not complete dream analysis. Verify your Gemini key settings in the sidebar.")
 
 
 # ── Footer ────────────────────────────────────────────────────────────────────

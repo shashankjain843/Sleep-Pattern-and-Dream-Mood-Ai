@@ -59,15 +59,20 @@ def verify_password(plain: str, stored_hash: str, salt: str) -> bool:
 
 
 # ── User CRUD ─────────────────────────────────────────────────────────────────
-def register_user(username: str, password: str) -> bool:
-    """Register a new user. Returns False if username already taken."""
+def register_user(username: str, password: str, email: str) -> bool:
+    """Register a new user. Returns False if username or email already taken."""
     users = _load_users()
     if username in users:
         return False
+    # Check email uniqueness
+    for u, data in users.items():
+        if data.get("email") == email:
+            return False
+            
     pw_hash, salt = _hash_password(password)
-    users[username] = {"hash": pw_hash, "salt": salt}
+    users[username] = {"hash": pw_hash, "salt": salt, "email": email}
     _save_users(users)
-    logger.info("New user registered: %s", username)
+    logger.info("New user registered: %s (%s)", username, email)
     return True
 
 

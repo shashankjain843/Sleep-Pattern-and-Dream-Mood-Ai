@@ -1,0 +1,61 @@
+{
+  "accuracy": 0.459,
+  "loss": 0.0,
+  "classes": [
+    "Light",
+    "Deep",
+    "REM"
+  ],
+  "classification_report": {
+    "Light": {
+      "precision": 0.4827586206896552,
+      "recall": 0.9333333333333333,
+      "f1-score": 0.6363636363636364,
+      "support": 30.0
+    },
+    "Deep": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1-score": 0.0,
+      "support": 25.0
+    },
+    "REM": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1-score": 0.0,
+      "support": 6.0
+    },
+    "accuracy": 0.45901639344262296,
+    "macro avg": {
+      "precision": 0.16091954022988506,
+      "recall": 0.3111111111111111,
+      "f1-score": 0.21212121212121213,
+      "support": 61.0
+    },
+    "weighted avg": {
+      "precision": 0.23742227247032224,
+      "recall": 0.45901639344262296,
+      "f1-score": 0.31296572280178836,
+      "support": 61.0
+    }
+  },
+  "confusion_matrix": [
+    [
+      28,
+      2,
+      0
+    ],
+    [
+      25,
+      0,
+      0
+    ],
+    [
+      5,
+      1,
+      0
+    ]
+  ],
+  "trained_at": "2026-07-07T09:01:58.246758+00:00",
+  "is_rf": true
+}

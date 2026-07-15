@@ -1,0 +1,26 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Testing
+.pytest_cache/
+.pytest/
+.cache/
+
+# Local databases and secrets
+.env
+sleep_ai.db
+users.json
+
+# Datasets
+datasets/
+
+# Inference results and temporary data
+inference_results.json

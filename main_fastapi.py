@@ -24,6 +24,19 @@ from pydantic import BaseModel
 import numpy as np
 import pandas as pd
 
+# Load .env file manually to avoid dependency on python-dotenv on Python 3.14
+def load_env_file():
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, val = line.split("=", 1)
+                    os.environ[key.strip()] = val.strip()
+
+load_env_file()
+
 from run_inference import (
     load_models, predict_sleep_segment, predict_mood_segment,
     simulate_sleep_logic, simulate_mood_logic, TF_AVAILABLE,
@@ -32,8 +45,10 @@ from preprocess_sleepedf import load_and_preprocess_file
 from preprocess_yaad import load_single_yaad_trial
 from suggestions import generate_full_report, generate_sleep_suggestions, generate_mood_suggestions
 from database import init_db, save_session, get_sessions
-from auth import register_user, authenticate_user, create_access_token, get_current_user
+from auth import register_user, authenticate_user, create_access_token, get_current_user, _load_users
 import llm_client
+import dream_mood_module
+import sleep_pattern_analyst
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -87,9 +102,27 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    email:    Optional[str] = None
+
+
+class VerifyRequest(BaseModel):
+    username:          str
+    verification_code: str
+
+
 class InsightRequest(BaseModel):
     question:        str
     session_metrics: dict
+
+
+class DreamRequest(BaseModel):
+    dream_text:  str
+    mood:        str
+    rem_percent: float
+    heart_rate:  int
 
 
 # ── Helper ────────────────────────────────────────────────────────────────────
@@ -113,12 +146,83 @@ def _np_to_python(obj):
 
 
 # ── Auth endpoints ────────────────────────────────────────────────────────────
+pending_registrations = {}  # key: username, value: {"password": "...", "email": "...", "code": "..."}
+
 @app.post("/register")
-async def api_register(req: LoginRequest):
-    success = register_user(req.username, req.password)
+async def api_register(req: RegisterRequest):
+    username = req.username.strip()
+
+    if not username or not req.password:
+        raise HTTPException(status_code=400, detail="Username and password are required.")
+
+    # If email is not provided, register directly (for backwards compatibility & tests)
+    if not req.email or not req.email.strip():
+        success = register_user(username, req.password, f"{username}@example.com")
+        if not success:
+            raise HTTPException(status_code=409, detail="Username already taken.")
+        return {"message": f"User '{username}' registered successfully."}
+
+    email = req.email.strip()
+
+    # 1. Check existing in users.json
+    users = _load_users()
+    if username in users:
+        raise HTTPException(status_code=409, detail="Username already registered. Please login instead.")
+    for u, data in users.items():
+        if data.get("email") == email:
+            raise HTTPException(status_code=409, detail="Email already registered. Please login instead.")
+
+    # 2. Check pending registrations
+    for u, data in pending_registrations.items():
+        if data.get("email") == email and u != username:
+            raise HTTPException(status_code=409, detail="Email registration is already pending.")
+
+    # Generate a random 6-digit verification code
+    import random
+    code = f"{random.randint(100000, 999999)}"
+    pending_registrations[username] = {
+        "password": req.password,
+        "email": email,
+        "code": code
+    }
+
+    logger.info("Mock verification code sent to %s: %s", email, code)
+    return {
+        "message": f"Verification code sent to {email}.",
+        "mock_code": code
+    }
+
+
+@app.post("/verify_email")
+async def api_verify_email(req: VerifyRequest):
+    username = req.username.strip()
+    code = req.verification_code.strip()
+
+    if username not in pending_registrations:
+        raise HTTPException(status_code=400, detail="No pending registration found for this username.")
+
+    pending = pending_registrations[username]
+    if pending["code"] != code:
+        raise HTTPException(status_code=400, detail="Invalid verification code.")
+
+    # Save user to DB (users.json)
+    success = register_user(username, pending["password"], pending["email"])
     if not success:
-        raise HTTPException(status_code=409, detail="Username already taken.")
-    return {"message": f"User '{req.username}' registered successfully."}
+        raise HTTPException(status_code=409, detail="Failed to register user. Username or email may have been taken.")
+
+    # Clear pending entry
+    pending_registrations.pop(username)
+
+    # Automatically generate access token to log them in directly
+    token = create_access_token(username)
+    if token is None:
+        raise HTTPException(status_code=500, detail="Token generation failed (PyJWT not installed).")
+
+    return {
+        "access_token": token,
+        "username": username,
+        "message": "Email verified and logged in successfully!"
+    }
 
 
 @app.post("/login")
@@ -133,12 +237,19 @@ async def api_login(req: LoginRequest):
 
 # ── Status endpoint ───────────────────────────────────────────────────────────
 @app.get("/status")
-async def api_status():
+async def api_status(
+    x_gemini_key: Optional[str] = Header(default=None),
+    x_anthropic_key: Optional[str] = Header(default=None),
+):
+    sleep_loaded = (sleep_model is not None) or os.path.exists("models/sleep_rf.model")
+    gemini_avail = llm_client.is_available(x_gemini_key, "gemini")
+    claude_avail = llm_client.is_available(x_anthropic_key, "claude")
     return {
         "tf_available":       TF_AVAILABLE,
-        "sleep_model_loaded": sleep_model is not None,
+        "sleep_model_loaded": sleep_loaded,
         "mood_model_loaded":  mood_model is not None,
-        "claude_available":   llm_client.is_available(),
+        "claude_available":   claude_avail or gemini_avail,
+        "gemini_available":   gemini_avail,
     }
 
 
@@ -152,17 +263,51 @@ async def api_history(authorization: Optional[str] = Header(default=None)):
 
 # ── Report endpoints ──────────────────────────────────────────────────────────
 @app.post("/generate_report")
-async def api_generate_report(req: ReportRequest):
+async def api_generate_report(
+    req: ReportRequest,
+    authorization: Optional[str] = Header(default=None),
+    x_gemini_key: Optional[str] = Header(default=None),
+    x_anthropic_key: Optional[str] = Header(default=None),
+):
+    user = _user_from_header(authorization)
     s_metrics = req.sleep_metrics.copy()
-    report = generate_full_report(s_metrics, req.mood_metrics)
+    report = generate_full_report(
+        s_metrics, 
+        req.mood_metrics, 
+        gemini_key=x_gemini_key, 
+        anthropic_key=x_anthropic_key
+    )
+
+    try:
+        save_session(
+            user_id=user,
+            input_source="combined_report",
+            sleep_metrics=s_metrics,
+            mood_metrics=req.mood_metrics,
+            suggestions=report["suggestions_list"],
+        )
+    except Exception:
+        logger.warning("Failed to save combined session", exc_info=True)
+
     return report
 
 
 @app.post("/generate_report_pdf")
-async def api_generate_report_pdf(req: ReportRequest):
+async def api_generate_report_pdf(
+    req: ReportRequest,
+    authorization: Optional[str] = Header(default=None),
+    x_gemini_key: Optional[str] = Header(default=None),
+    x_anthropic_key: Optional[str] = Header(default=None),
+):
     from pdf_report import generate_report_pdf
+    user = _user_from_header(authorization)
     s_metrics = req.sleep_metrics.copy()
-    report    = generate_full_report(s_metrics, req.mood_metrics)
+    report    = generate_full_report(
+        s_metrics, 
+        req.mood_metrics, 
+        gemini_key=x_gemini_key, 
+        anthropic_key=x_anthropic_key
+    )
     pdf_bytes = generate_report_pdf(report)
     if pdf_bytes is None:
         raise HTTPException(
@@ -178,19 +323,68 @@ async def api_generate_report_pdf(req: ReportRequest):
 
 # ── LLM Q&A endpoint ─────────────────────────────────────────────────────────
 @app.post("/ask_insight")
-async def api_ask_insight(req: InsightRequest):
-    if not llm_client.is_available():
+async def api_ask_insight(
+    req: InsightRequest,
+    x_gemini_key: Optional[str] = Header(default=None),
+    x_anthropic_key: Optional[str] = Header(default=None),
+):
+    # Determine provider and key
+    api_key = x_gemini_key
+    provider = "gemini"
+    if not api_key:
+        api_key = x_anthropic_key
+        provider = "claude"
+    if not api_key:
+        # Fallback to backend env variables
+        if os.environ.get("GEMINI_API_KEY"):
+            api_key = os.environ.get("GEMINI_API_KEY")
+            provider = "gemini"
+        elif os.environ.get("ANTHROPIC_API_KEY"):
+            api_key = os.environ.get("ANTHROPIC_API_KEY")
+            provider = "claude"
+
+    if not llm_client.is_available(api_key, provider):
         return {
             "answer": (
-                "AI insights require an Anthropic API key. "
-                "Set the ANTHROPIC_API_KEY environment variable to enable this feature."
+                "AI insights require a Gemini or Anthropic API key. "
+                "Enter it in the sidebar API Settings to enable this feature."
             ),
             "source": "unavailable",
         }
-    answer = llm_client.answer_insight(req.question, req.session_metrics)
+    answer = llm_client.answer_insight(req.question, req.session_metrics, api_key=api_key, provider=provider)
     if answer is None:
-        return {"answer": "Could not get an answer from Claude. Please try again.", "source": "error"}
-    return {"answer": answer, "source": "claude"}
+        return {"answer": f"Could not get an answer from {provider.capitalize()}. Please try again.", "source": "error"}
+    return {"answer": answer, "source": provider}
+
+
+# ── Dream Journal endpoint ───────────────────────────────────────────────────
+@app.post("/analyze_dream")
+async def api_analyze_dream(
+    req: DreamRequest,
+    x_gemini_key: Optional[str] = Header(default=None),
+):
+    result = dream_mood_module.process_dream_entry(
+        dream_text=req.dream_text,
+        mood=req.mood,
+        rem_percent=req.rem_percent,
+        heart_rate=req.heart_rate,
+        api_key=x_gemini_key
+    )
+    return result
+
+
+# ── AI Trend Analyst endpoint ─────────────────────────────────────────────────
+@app.get("/analyze_trends")
+async def api_analyze_trends(
+    authorization: Optional[str] = Header(default=None),
+    x_gemini_key: Optional[str] = Header(default=None),
+):
+    user = _user_from_header(authorization)
+    result = sleep_pattern_analyst.run_full_analysis(
+        user_id=user,
+        api_key=x_gemini_key
+    )
+    return result
 
 
 # ── Sleep prediction endpoints ────────────────────────────────────────────────

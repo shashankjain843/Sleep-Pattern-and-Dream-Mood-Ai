@@ -82,11 +82,16 @@ def generate_mood_suggestions(mood_label: str, mood_probs: dict) -> list[str]:
     return suggestions
 
 
-def generate_full_report(sleep_metrics: dict, mood_metrics: dict) -> dict:
+def generate_full_report(
+    sleep_metrics: dict, 
+    mood_metrics: dict, 
+    gemini_key: Optional[str] = None, 
+    anthropic_key: Optional[str] = None
+) -> dict:
     """
     Generates the full report dict.
-    If ANTHROPIC_API_KEY is set, attempts to replace the templated narrative
-    with a Claude-generated personalised paragraph (fallback on failure).
+    If GEMINI_API_KEY / ANTHROPIC_API_KEY (or custom keys) are set, attempts to 
+    replace the templated narrative with an AI-generated personalised paragraph.
     """
     # Normalise key names
     s_metrics = sleep_metrics.copy()
@@ -124,27 +129,34 @@ def generate_full_report(sleep_metrics: dict, mood_metrics: dict) -> dict:
     else:
         combined_insights += "Maintaining a consistent sleep schedule can help stabilise your mood."
 
-    # ── Optional Claude narrative (replaces template if available) ────────────
-    narrative: Optional[str] = None
-    if llm_client.is_available():
-        try:
-            narrative = llm_client.generate_narrative(s_metrics, mood_metrics)
-            if narrative:
-                logger.info("Claude narrative generated successfully")
-        except Exception:
-            logger.warning("Claude narrative failed — using template", exc_info=True)
+    # Determine provider and key
+    api_key = gemini_key or llm_client._GEMINI_API_KEY
+    provider = "gemini"
+    if not api_key:
+        api_key = anthropic_key or llm_client._ANTHROPIC_API_KEY
+        provider = "claude"
 
-    # ── Optional Claude correlated suggestions ────────────────────────────────
+    # ── Optional AI narrative (replaces template if available) ────────────────
+    narrative: Optional[str] = None
+    if llm_client.is_available(api_key, provider):
+        try:
+            narrative = llm_client.generate_narrative(s_metrics, mood_metrics, api_key=api_key, provider=provider)
+            if narrative:
+                logger.info("%s narrative generated successfully", provider.capitalize())
+        except Exception:
+            logger.warning("%s narrative failed — using template", provider.capitalize(), exc_info=True)
+
+    # ── Optional AI correlated suggestions ────────────────────────────────────
     all_suggestions = sleep_suggestions + mood_suggestions
-    if llm_client.is_available():
+    if llm_client.is_available(api_key, provider):
         try:
             full_feats = {**s_metrics, **mood_metrics}
-            correlated = llm_client.generate_correlated_suggestions(full_feats)
+            correlated = llm_client.generate_correlated_suggestions(full_feats, api_key=api_key, provider=provider)
             if correlated:
-                all_suggestions = correlated + all_suggestions  # Claude suggestions first
-                logger.info("Claude correlated suggestions added")
+                all_suggestions = correlated + all_suggestions  # AI suggestions first
+                logger.info("%s correlated suggestions added", provider.capitalize())
         except Exception:
-            logger.warning("Claude correlated suggestions failed — using rule-based", exc_info=True)
+            logger.warning("%s correlated suggestions failed — using rule-based", provider.capitalize(), exc_info=True)
 
     # ── Warnings ──────────────────────────────────────────────────────────────
     warnings = []
@@ -158,8 +170,9 @@ def generate_full_report(sleep_metrics: dict, mood_metrics: dict) -> dict:
         "sleep_summary":    sleep_summary,
         "mood_summary":     mood_summary,
         "combined_insights": combined_insights,
-        "narrative":        narrative,           # None if Claude unavailable
+        "narrative":        narrative,           # None if AI unavailable
         "suggestions_list": all_suggestions,
         "warnings":         warnings,
-        "claude_powered":   narrative is not None,
+        "claude_powered":   narrative is not None,  # Keep key name for backward compatibility
+        "ai_provider":      provider if narrative else None
     }
