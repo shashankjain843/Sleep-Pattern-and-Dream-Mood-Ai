@@ -216,24 +216,24 @@ Even with high-quality database signals, the following operations are systematic
 
 ## 3. Hyperparameter Tuning
 
-Optimizing models requires fine-tuning key parameters using **Grid Search** and **Random Search** with **5-Fold Cross-Validation**.
+Optimizing models requires fine-tuning key parameters. This has been fully automated in the training pipelines:
+- **XGBoost Mood Classifier**: Programmatically optimized using `GridSearchCV` (with 3-fold cross-validation) over the parameter grid below.
+- **CNN-LSTM Sleep Classifier**: Hyperparameters configured according to sequential validation criteria.
 
-### CNN-LSTM Staging Model Parameters
-The neural network hyperparameters tuned include:
-* **Learning Rate**: Range `[1e-4, 1e-3, 5e-3]` (Optimal: `1e-3` with Adam optimizer).
-* **Optimizer**: Tuned between `Adam`, `RMSprop`, and `SGD`.
-* **Batch Size**: Evaluated at `16`, `32`, and `64` (Optimal: `32`).
-* **Epochs**: Restricted to `5` to prevent overfitting on smaller sample splits.
-* **Dropout Rate**: Tested between `0.2` and `0.5` (Optimal: `0.3` after max-pooling and LSTM layers).
-* **Filters**: Conv1D filters tuned at `[32, 64, 128]` (Optimal: Conv1D_1 = 64, Conv1D_2 = 128).
+### CNN-LSTM Staging Model Parameters (Configured)
+The neural network hyperparameters configured include:
+* **Learning Rate**: `1e-3` (Adam optimizer).
+* **Batch Size**: `32`.
+* **Epochs**: `5`.
+* **Dropout Rate**: `0.3` (after max-pooling and LSTM layers).
+* **Filters**: Conv1D_1 = 64, Conv1D_2 = 128.
 
-### XGBoost Mood Model Parameters
-The gradient boosted classifier is tuned over:
-* **`max_depth`**: Range `[3, 5, 7, 9]` (Optimal: `5`).
-* **`learning_rate`**: Range `[0.01, 0.05, 0.1, 0.2]` (Optimal: `0.05`).
-* **`n_estimators`**: Range `[50, 100, 200]` (Optimal: `100`).
-* **`subsample`**: Range `[0.6, 0.8, 1.0]` (Optimal: `0.8`).
-* **`colsample_bytree`**: Range `[0.6, 0.8, 1.0]` (Optimal: `0.8`).
+### XGBoost Mood Model Parameters (GridSearchCV Tuned)
+The gradient boosted classifier parameters tuned via Grid Search:
+* **`max_depth`**: Tuned over `[3, 5]` (**Optimal: 3**).
+* **`learning_rate`**: Tuned over `[0.05, 0.1]` (**Optimal: 0.1**).
+* **`n_estimators`**: Tuned over `[50, 100]` (**Optimal: 100**).
+* **Cross-Validation**: 3-Fold CV accuracy score of **52.20%** achieved on training subset.
 
 ---
 
