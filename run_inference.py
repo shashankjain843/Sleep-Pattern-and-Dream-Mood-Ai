@@ -91,6 +91,17 @@ def predict_mood_segment(ecg, gsr, model):
     ]
     df_feats = pd.DataFrame(feats, columns=cols)
 
+    # ── Feature Normalization (Load scaler and transform) ────────────────────
+    SCALER_PATH = "models/mood_scaler.joblib"
+    if os.path.exists(SCALER_PATH):
+        try:
+            scaler = joblib.load(SCALER_PATH)
+            scaled_vals = scaler.transform(df_feats)
+            df_feats = pd.DataFrame(scaled_vals, columns=cols)
+            logger.debug("Successfully loaded scaler and transformed input features")
+        except Exception as e:
+            logger.warning("Error loading or using scaler: %s", e)
+
     pred  = model.predict(df_feats)[0]
     probs = model.predict_proba(df_feats)[0]
 

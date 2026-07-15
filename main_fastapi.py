@@ -20,7 +20,7 @@ from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File, Header, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import numpy as np
 import pandas as pd
 
@@ -77,19 +77,19 @@ logger.info(
 
 # ── Request / Response models ─────────────────────────────────────────────────
 class SimulationInputSleep(BaseModel):
-    hr:       float
-    movement: float
-    spo2:     float
-    hrv_var:  float
-    duration: float
+    hr:       float = Field(..., ge=0, le=300, description="Heart rate (BPM), must be positive and under 300")
+    movement: float = Field(..., ge=0, le=100, description="Movement level, must be non-negative")
+    spo2:     float = Field(..., ge=0, le=100, description="SpO2 percentage, must be between 0 and 100")
+    hrv_var:  float = Field(..., ge=0, le=200, description="HRV variance, must be non-negative")
+    duration: float = Field(..., ge=0, le=24, description="Sleep duration in hours, must be between 0 and 24")
 
 
 class SimulationInputMood(BaseModel):
-    rmssd:     float
-    hr:        float
-    gsr_peaks: float
-    gsr_slope: float
-    stress:    float
+    rmssd:     float = Field(..., ge=0, le=500, description="RMSSD in ms, must be non-negative")
+    hr:        float = Field(..., ge=0, le=300, description="Heart rate (BPM), must be positive and under 300")
+    gsr_peaks: float = Field(..., ge=0, le=100, description="Number of GSR peaks, must be non-negative")
+    gsr_slope: float = Field(..., ge=-10, le=10, description="GSR signal slope")
+    stress:    float = Field(..., ge=1, le=10, description="Stress level indicator, must be between 1 and 10")
 
 
 class ReportRequest(BaseModel):

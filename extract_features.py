@@ -86,9 +86,19 @@ def extract_features():
             "mean_gsr", "std_gsr", "num_peaks", "mean_peak_amp", "slope",
         ]
         df_yaad = pd.DataFrame(feats_yaad, columns=cols)
+        
+        # ── IQR Outlier Capping ───────────────────────────────────────────────
+        for col in cols:
+            q1 = df_yaad[col].quantile(0.25)
+            q3 = df_yaad[col].quantile(0.75)
+            iqr = q3 - q1
+            lower_bound = q1 - 1.5 * iqr
+            upper_bound = q3 + 1.5 * iqr
+            df_yaad[col] = df_yaad[col].clip(lower=lower_bound, upper=upper_bound)
+        
         df_yaad["label"] = y_yaad
         df_yaad.to_csv("features_yaad.csv", index=False)
-        logger.info("Saved features_yaad.csv (%d rows)", len(df_yaad))
+        logger.info("Saved features_yaad.csv (%d rows after IQR capping)", len(df_yaad))
 
     except Exception:
         logger.exception("Error during feature extraction")

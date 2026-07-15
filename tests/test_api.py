@@ -188,3 +188,26 @@ class TestHistory:
         assert r.status_code == 200
         assert "sessions" in r.json()
         assert isinstance(r.json()["sessions"], list)
+
+
+# ── Edge Case Input Validation ───────────────────────────────────────────────
+class TestSimulateEdgeCases:
+    def test_negative_heart_rate_returns_422(self):
+        payload = {"hr": -5, "movement": 2, "spo2": 98, "hrv_var": 50, "duration": 8}
+        r = client.post("/simulate_sleep", json=payload)
+        assert r.status_code == 422
+
+    def test_invalid_spo2_returns_422(self):
+        payload = {"hr": 70, "movement": 2, "spo2": 150, "hrv_var": 50, "duration": 8}
+        r = client.post("/simulate_sleep", json=payload)
+        assert r.status_code == 422
+
+    def test_negative_rmssd_returns_422(self):
+        payload = {"rmssd": -10, "hr": 70, "gsr_peaks": 5, "gsr_slope": 0.1, "stress": 3}
+        r = client.post("/simulate_mood", json=payload)
+        assert r.status_code == 422
+
+    def test_invalid_stress_level_returns_422(self):
+        payload = {"rmssd": 40, "hr": 70, "gsr_peaks": 5, "gsr_slope": 0.1, "stress": 99}
+        r = client.post("/simulate_mood", json=payload)
+        assert r.status_code == 422
